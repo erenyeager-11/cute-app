@@ -1,0 +1,11 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /rooms/{rid}/{uid}/{file} {
+      function member() { return request.auth != null && request.auth.uid in firestore.get(/databases/(default)/documents/rooms/$(rid)).data.members; }
+      allow read: if member();
+      allow write: if member() && request.auth.uid == uid && request.resource.size < 50 * 1024 * 1024
+        && request.resource.contentType.matches('(image|audio|video)/.*');
+    }
+  }
+}

@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function signedIn() { return request.auth != null; }
+    function isMember(rid) { return signedIn() && request.auth.uid in get(/databases/$(db)/documents/rooms/$(rid)).data.members; }
+
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+    match /rooms/{rid} {
+      // Joining needs to look a room up by its code; only the member list is exposed.
+      allow get: if signedIn();
+      allow create: if signedIn() && request.resource.data.members == [request.auth.uid];
+      // Join: only while exactly 1 member, only adding yourself, never more than 2.
+      allow update: if signedIn()
+        && resource.data.members.size() == 1
+        && !(request.auth.uid in resource.data.members)
+        && request.resource.data.members == resource.data.members.concat([request.auth.uid])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members']);
+
+      match /rings/{id} {
+        allow read: if isMember(rid);
+        allow create: if isMember(rid) && request.resource.data.from == request.auth.uid && request.resource.data.status == 'pending';
+        // Only the RECEIVER can change status (consent).
+        allow update: if isMember(rid) && resource.data.from != request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+      }
+      match /shares/{id} {
+        allow read: if isMember(rid);
+        allow create: if isMember(rid) && request.resource.data.from == request.auth.uid && request.resource.data.status == 'pending';
+        allow update: if isMember(rid) && resource.data.from != request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+      }
+      match /games/{id} {
+        allow read, create, update: if isMember(rid);
+      }
+    }
+  }
+}
